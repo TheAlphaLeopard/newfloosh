@@ -28,6 +28,12 @@
     .top img {
       width: 396px; /* 345 * 1.15 */
       height: auto;
+      animation: pulse 2s infinite ease-in-out alternate;
+    }
+
+    @keyframes pulse {
+      from { transform: scale(1); }
+      to { transform: scale(1.1); }
     }
     
     .middle {
@@ -42,12 +48,8 @@
       cursor: pointer;
       background: #dcdcdc;
       border-radius: 4px;
-      transition: background 0.2s ease, transform 0.1s ease;
+      transition: background 0.2s ease;
       user-select: none;
-    }
-
-    .upload-area:active {
-      transform: scale(0.98);
     }
     
     .upload-area:hover {
@@ -212,8 +214,12 @@
                 // (Already handled by 1 & 2 usually, but let's be safe)
 
                 for (const p of candidates) {
-                  if (blobMap[p]) return blobMap[p] + search + hash;
-                  if (blobMap['/' + p]) return blobMap['/' + p] + search + hash;
+                  const cleanCandidate = p.replace(/\/+/g, '/'); // Normalize slashes
+                  if (blobMap[cleanCandidate]) return blobMap[cleanCandidate] + search + hash;
+                  
+                  // Try without leading slash if present
+                  const noLead = cleanCandidate.startsWith('/') ? cleanCandidate.substring(1) : cleanCandidate;
+                  if (blobMap[noLead]) return blobMap[noLead] + search + hash;
                 }
               } catch(e) {}
               return url;
@@ -271,6 +277,9 @@
       } else {
         alert("Pop-up blocked! Please allow pop-ups to view the content.");
       }
+
+      // Reset state to prevent "combining" uploads or memory leaks in the opener
+      folderInput.value = '';
     }
 
     function rewriteUrls(content, baseDir, blobMap) {
