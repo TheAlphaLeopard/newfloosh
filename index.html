@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>floosh64</title>
+  <title>nfk</title>
   <style>
     * {
       margin: 0;
@@ -42,7 +42,12 @@
       cursor: pointer;
       background: #dcdcdc;
       border-radius: 4px;
-      transition: background 0.2s ease;
+      transition: background 0.2s ease, transform 0.1s ease;
+      user-select: none;
+    }
+
+    .upload-area:active {
+      transform: scale(0.98);
     }
     
     .upload-area:hover {
@@ -60,15 +65,30 @@
   </div>
   <div class="middle">
     <div class="upload-area" id="uploadArea">
-      <p>Drop a folder/zip here</p>
+      <p>Drop a folder here</p>
     </div>
+    <input type="file" id="folderInput" webkitdirectory directory multiple>
   </div>
 
   <script type="module">
-    import JSZip from 'https://esm.sh/jszip@3.10.1';
     import { getMimeType } from './flooshmime.js';
 
     const uploadArea = document.getElementById('uploadArea');
+    const folderInput = document.getElementById('folderInput');
+
+    uploadArea.addEventListener('click', () => {
+      folderInput.click();
+    });
+
+    folderInput.addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files).map(file => ({
+        path: file.webkitRelativePath || file.name,
+        file: file
+      }));
+      if (files.length > 0) {
+        processFiles(files);
+      }
+    });
 
     uploadArea.addEventListener('dragover', (e) => {
       e.preventDefault();
@@ -94,10 +114,6 @@
           } else {
             const file = item.getAsFile();
             if (file) {
-              if (file.name.toLowerCase().endsWith('.zip')) {
-                await processZip(file);
-                return;
-              }
               processFiles([{ path: file.name, file }]);
             }
           }
@@ -107,33 +123,11 @@
       if (fileEntries.length > 0) {
         const files = [];
         for (const entry of fileEntries) {
-          if (entry.isFile && entry.name.toLowerCase().endsWith('.zip')) {
-             const file = await new Promise(r => entry.file(r));
-             await processZip(file);
-             return;
-          }
           await traverseDirectory(entry, '', files);
         }
         processFiles(files);
       }
     });
-
-    async function processZip(zipFile) {
-      const zip = await JSZip.loadAsync(zipFile);
-      const files = [];
-      const promises = [];
-      
-      zip.forEach((relativePath, zipEntry) => {
-        if (!zipEntry.dir) {
-          promises.push(zipEntry.async('blob').then(blob => {
-            files.push({ path: relativePath, file: blob });
-          }));
-        }
-      });
-      
-      await Promise.all(promises);
-      processFiles(files);
-    }
 
     async function traverseDirectory(entry, path, files) {
       if (entry.isFile) {
@@ -194,32 +188,49 @@
               try {
                 const urlObj = new URL(url, window.location.href);
                 if (urlObj.origin !== window.location.origin) return url;
+                
                 let path = urlObj.pathname;
+                // Remove leading slash for consistency with map keys
                 if (path.startsWith('/')) path = path.substring(1);
                 
-                // Try resolving relative to baseDir if needed
-                const pathsToTry = [path];
-                if (baseDir && !path.startsWith(baseDir)) {
-                   pathsToTry.unshift(baseDir + path);
+                const search = urlObj.search;
+                const hash = urlObj.hash;
+                const cleanPath = path;
+
+                // Candidate paths to look up in the blobMap
+                const candidates = [];
+                
+                // 1. Direct path (e.g. "engine.wasm")
+                candidates.push(cleanPath);
+                
+                // 2. Relative to baseDir (e.g. "folder/engine.wasm")
+                if (baseDir && !cleanPath.startsWith(baseDir)) {
+                  candidates.push(baseDir + cleanPath);
                 }
 
-                for (const p of pathsToTry) {
-                  const cleanPath = p.split('?')[0].split('#')[0];
-                  if (blobMap[cleanPath]) return blobMap[cleanPath];
-                  // Handle cases where the path might have leading slashes in map
-                  if (blobMap['/' + cleanPath]) return blobMap['/' + cleanPath];
+                // 3. If path is absolute-ish but inside the dropped folder
+                // (Already handled by 1 & 2 usually, but let's be safe)
+
+                for (const p of candidates) {
+                  if (blobMap[p]) return blobMap[p] + search + hash;
+                  if (blobMap['/' + p]) return blobMap['/' + p] + search + hash;
                 }
               } catch(e) {}
               return url;
             }
 
             const nativeFetch = window.fetch;
-            window.fetch = function(input, init) {
-              if (typeof input === 'string') {
-                input = resolve(input);
-              } else if (input instanceof Request) {
-                input = new Request(resolve(input.url), input);
+            window.fetch = async function(input, init) {
+              let url = (typeof input === 'string') ? input : (input instanceof Request ? input.url : input);
+              const resolvedUrl = resolve(url);
+              
+              if (resolvedUrl.startsWith('blob:')) {
+                // For local blobs, we must handle the request manually to ensure 
+                // headers like Content-Type are respected by some loaders
+                const response = await nativeFetch(resolvedUrl, init);
+                return response;
               }
+              
               return nativeFetch(input, init);
             };
 
@@ -228,12 +239,13 @@
               const xhr = new nativeXHR();
               const nativeOpen = xhr.open;
               xhr.open = function(method, url, ...args) {
-                return nativeOpen.call(this, method, resolve(url), ...args);
+                const resolvedUrl = resolve(url);
+                return nativeOpen.call(this, method, resolvedUrl, ...args);
               };
               return xhr;
             };
 
-            // Patch dynamic imports / module scripts if possible via base tag
+            // Help the browser resolve relative paths correctly in the new document
             const base = document.createElement('base');
             base.href = window.location.href;
             document.head.appendChild(base);
