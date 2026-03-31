@@ -1,2 +1,2 @@
 # newfloosh
-new floosh and knuckles is the updated and better version of floosh64 that is honestly just a better idea and i dont know why i didnt think of this before lol. **This project was vibecoded**
+newfloosh is a html tool used to play video games that require online service, without needing to host it on a website allowsing games to be played at school. **The creation of this tool was assisted by AI**
